@@ -1,0 +1,10 @@
+deployment:
+  release:
+    tag: /v[0-9]+(\.[0-9]+)*/
+    commands:
+      - mkdir bin
+      - go build -o bin/s6_exporter
+      - tar czf $CIRCLE_ARTIFACTS/s6_exporter-$CIRCLE_TAG.linux-amd64.tar.gz bin/s6_exporter
+      - gem install fpm
+      - fpm -v $( echo $CIRCLE_TAG | tr -d v ) --url $CIRCLE_REPOSITORY_URL -p $CIRCLE_ARTIFACTS/
+        --provides s6-exporter -n prometheus-s6-exporter -t deb -s dir bin/=/opt/bin
