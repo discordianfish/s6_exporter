@@ -1,5 +1,5 @@
-VERSION  = $(shell git describe)
 REVISION = $(shell git rev-parse --short HEAD)
+VERSION  = $(shell git name-rev --tags --name-only $(REVISION))
 BRANCH   = $(shell git symbolic-ref --short -q HEAD)
 DATE     = $(shell date +%Y%m%d-%H:%M:%S)
 build:
