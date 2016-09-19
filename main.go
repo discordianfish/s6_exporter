@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
@@ -47,6 +48,7 @@ func (e *exporter) Collect(ch chan<- prometheus.Metric) {
 	if err != nil {
 		log.Println("Couldn't read service directory:", err)
 		e.errors.Inc()
+		ch <- e.errors
 		return
 	}
 	for _, file := range files {
@@ -60,10 +62,12 @@ func (e *exporter) Collect(ch chan<- prometheus.Metric) {
 			e.errors.Inc()
 			continue
 		}
+		sc = float64(time.Now().Add(-time.Duration(sc) * time.Second).Unix())
 		ch <- prometheus.MustNewConstMetric(e.metricUp, prometheus.GaugeValue, up, service)
 		ch <- prometheus.MustNewConstMetric(e.metricWant, prometheus.GaugeValue, want, service)
 		ch <- prometheus.MustNewConstMetric(e.metricStateChange, prometheus.GaugeValue, sc, service)
 	}
+	ch <- e.errors
 }
 
 func (e *exporter) svStat(name string) (up, want, sc float64, err error) {
@@ -115,25 +119,40 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	errors := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "s6_exporter_errors_total",
+		Help: "Total number of errors s6_exporter encountered",
+	})
 	prometheus.MustRegister(version.NewCollector("s6_exporter"))
 	prometheus.MustRegister(&exporter{
 		serviceDir: *serviceDir,
 		svStatBin:  svStatBin,
-		errors: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "s6_exporter_errors_total",
-			Help: "Total number of errors s6_exporter encountered",
-		}),
-		metricUp: prometheus.NewDesc("s6_service_up", "State of s6 service, 1 = up, 0 = down",
-			[]string{"service"}, nil),
-		metricWant: prometheus.NewDesc("s6_service_wanted_up", "Wanted state of s6 service, 1 = up, 0 = down",
-			[]string{"service"}, nil),
-		metricStateChange: prometheus.NewDesc("s5_service_seconds_since_last_change", "Unix timestamp of services last state change.",
-			[]string{"service"}, nil),
+		errors:     errors,
+		metricUp: prometheus.NewDesc(
+			"s6_service_up",
+			"State of s6 service, 1 = up, 0 = down",
+			[]string{"service"}, nil,
+		),
+		metricWant: prometheus.NewDesc(
+			"s6_service_wanted_up",
+			"Wanted state of s6 service, 1 = up, 0 = down",
+			[]string{"service"}, nil,
+		),
+		metricStateChange: prometheus.NewDesc(
+			"s6_service_state_change_timestamp_seconds",
+			"Unix timestamp of service's last state change.",
+			[]string{"service"}, nil,
+		),
 	})
 
 	http.Handle("/metrics", prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html><head>s6_exporter</title></head><body>See /metrics</body></html>`))
+		_, err := w.Write([]byte(`<html><head>s6_exporter</title></head><body>See /metrics</body></html>`))
+		if err != nil {
+			log.Println(err)
+			errors.Inc()
+		}
 	})
 	log.Println("Starting s6_exporter", version.Info())
 	log.Println("Build context", version.BuildContext())
